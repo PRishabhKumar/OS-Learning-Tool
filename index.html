@@ -148,6 +148,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:19px;heigh
 input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--brass-soft);border:2px solid #fff;box-shadow:0 0 0 1px var(--brass);cursor:grab}
 .keys-hint{text-align:center;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:1.1px;color:var(--muted)}
 .keys-hint b{color:var(--oxford)}
+.diag-link{cursor:pointer;text-decoration:underline dotted}
+.diag{position:absolute;top:60px;right:16px;z-index:6;max-width:320px;text-align:left;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;line-height:1.7;white-space:pre-wrap;
+  background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+  box-shadow:0 8px 28px rgba(31,42,66,.15)}
 .enter{animation:enter .4s ease}
 @keyframes enter{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .enter.up{animation-name:enterUp}
@@ -204,7 +209,8 @@ kbd{font-family:"IBM Plex Mono",monospace;font-size:10.5px;background:#fff;borde
     <div class="hud-chip chap-pill" id="chapPill"><b>CH 1/5</b> &middot; WHAT IS VIRTUALIZATION?</div>
     <div class="hud-chip live"><i></i>FIGURE &middot; 3D</div>
     <div class="hud-chip state-chip" id="stateChip"><small id="stateK">FIGURE &middot; STATE 1/4</small><span id="stateCap"></span></div>
-    <div class="hud-chip drag-hint" id="dragHint">DRAG TO ORBIT &middot; SCROLL TO ADVANCE</div>
+    <div class="hud-chip drag-hint" id="dragHint">DRAG TO ROTATE &middot; SCROLL FOR STEPS &middot; DOUBLE-CLICK RESETS</div>
+    <div class="diag" id="diag" style="display:none"></div>
     <button class="float-nav prev" id="fPrev" title="Previous state">&#8249;</button>
     <button class="float-nav next" id="fNext" title="Next state">&#8250;</button>
     <div class="webgl-fallback" id="glFallback">
@@ -235,7 +241,7 @@ kbd{font-family:"IBM Plex Mono",monospace;font-size:10.5px;background:#fff;borde
       <div class="scrub-top"><span>SCRUB THE FIGURE</span><span>FULLY REVERSIBLE</span></div>
       <input type="range" id="scrub" min="0" max="19" step="0.01" value="0" aria-label="Scrub 3D figure state">
     </div>
-    <div class="keys-hint"><b>SCROLL</b> &middot; <b>ARROW KEYS</b> &middot; <b>SPACE</b> &mdash; EVERY STEP REVERSIBLE</div>
+    <div class="keys-hint" id="keysHint"><b>SCROLL</b> &middot; <b>ARROW KEYS</b> &middot; <b>SPACE</b> &mdash; EVERY STEP REVERSIBLE &middot; <span class="diag-link" id="diagLink" title="Toggle diagnostics (D)">DIAG</span></div>
     <div class="lec-note" id="lecNote">LECTURE MODE &mdash; ADVANCING EVERY 7 SECONDS &middot; PRESS L TO STOP</div>
   </aside>
 </main>
@@ -247,8 +253,8 @@ kbd{font-family:"IBM Plex Mono",monospace;font-size:10.5px;background:#fff;borde
     <div class="krow"><span>Next state / previous state</span><span><kbd>&darr;</kbd><kbd>&rarr;</kbd><kbd>Space</kbd> / <kbd>&uarr;</kbd><kbd>&larr;</kbd></span></div>
     <div class="krow"><span>Mouse / trackpad scroll</span><span><kbd>scroll &darr;</kbd> next &middot; <kbd>scroll &uarr;</kbd> back</span></div>
     <div class="krow"><span>Scrub the figure continuously</span><span>drag the timeline slider</span></div>
-    <div class="krow"><span>Orbit the camera</span><span>drag anywhere on the figure</span></div>
-    <div class="krow"><span>Touch swipe</span><span>swipe up: next &middot; down: back</span></div>
+    <div class="krow"><span>Rotate the figure (full 360&deg;)</span><span>drag with mouse or touch &middot; double-click resets</span></div>
+    <div class="krow"><span>Touch gestures</span><span>drag rotates &middot; fast flick changes step</span></div>
     <div class="krow"><span>Jump to beginning / end</span><span><kbd>Home</kbd> <kbd>End</kbd></span></div>
     <div class="krow"><span>Lecture auto-play</span><span><kbd>L</kbd></span></div>
     <div class="krow"><span>Fullscreen</span><span><kbd>F</kbd></span></div>
@@ -657,7 +663,7 @@ const V_MESH=[
 "attribute vec3 position; attribute vec3 normal; attribute vec2 uv;",
 "uniform mat4 uProj; uniform mat4 uView; uniform mat4 uModel;",
 "varying vec3 vN; varying vec3 vW; varying float vFog;",
-"void main(){ vec4 w=uModel*vec4(position,1.0); vW=w.xyz; vN=mat3(uModel)*normal;",
+"void main(){ vec4 w=uModel*vec4(position,1.0); vW=w.xyz; vec4 wn=uModel*vec4(normal,0.0); vN=wn.xyz;",
 " vec4 v=uView*w; vFog=-v.z; gl_Position=uProj*v; }"
 ].join("\n");
 const F_MESH=[
@@ -722,7 +728,7 @@ const V_SPRITE=[
 "varying vec2 vUv; varying float vFog;",
 "void main(){ vUv=uv;",
 " vec3 w=uCenter+uRight*(corner.x*uScale.x)+uUp*(corner.y*uScale.y);",
-" vec4 v=uView*w; vFog=-v.z; gl_Position=uProj*v; }"
+" vec4 v=uView*vec4(w,1.0); vFog=-v.z; gl_Position=uProj*v; }"
 ].join("\n");
 const F_SPRITE=[
 "precision mediump float;",
@@ -750,7 +756,7 @@ const F_POINTS=[
 "uniform vec3 uFogColor; uniform vec2 uFogNF; uniform float uFogOn;",
 "varying float vFog;",
 "void main(){",
-" float m=smoothstep(0.5,0.12,length(gl_PointCoord-vec2(0.5)));",
+" float m=1.0-smoothstep(0.12,0.5,length(gl_PointCoord-vec2(0.5)));",
 " float f=uFogOn*smoothstep(uFogNF.x,uFogNF.y,vFog);",
 " vec3 col=mix(uColor,uFogColor,clamp(f,0.0,1.0));",
 " gl_FragColor=vec4(col,uOpacity*m); }"
@@ -767,6 +773,8 @@ class WebGLRenderer{
     if(!gl) throw new Error("WebGL unavailable");
     this.gl=gl; this._pr=1; this._w=300; this._h=300;
     this._clear=[1,1,1,1];
+    this.stats={draws:0,tris:0}; this._mode="webgl";
+    try{ const vv=gl.getParameter(gl.VERSION)||""; if(vv.indexOf("2.0")>=0) this._mode="webgl2"; }catch(e){}
     this._pMesh=this._prog(V_MESH,F_MESH);
     this._pBasic=this._prog(V_BASIC,F_BASIC);
     this._pLine=this._prog(V_LINE,F_LINE);
@@ -803,6 +811,7 @@ class WebGLRenderer{
     this.domElement.style.width=this._w+"px"; this.domElement.style.height=this._h+"px";
   }
   setClearColor(hex,a){ const c=hexRGB(hex); this._clear=[c[0],c[1],c[2],(a===undefined?1:a)]; }
+  getSize(){ return [this._w,this._h]; }
   _bufFor(attr){
     const gl=this.gl;
     if(!attr._buf){ attr._buf=gl.createBuffer(); attr.needsUpdate=true; }
@@ -859,6 +868,7 @@ class WebGLRenderer{
     gl.viewport(0,0,this.domElement.width,this.domElement.height);
     gl.clearColor(this._clear[0],this._clear[1],this._clear[2],this._clear[3]);
     gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+    this.stats.draws=0; this.stats.tris=0;
     scene.updateMatrixWorld();
     const UP={x:0,y:1,z:0};
     this._view.lookAt(camera.position,camera._tgt||{x:0,y:0,z:0},UP);
@@ -907,6 +917,7 @@ class WebGLRenderer{
       const o=items[k].o, m=o.material;
       if(m.transparent&&m.opacity<0.004) continue;
       this._state(m);
+      this.stats.draws++;
       const MW=o.matrixWorld.elements;
       if(o.isMesh&&m.isMeshStandard){
         const pg=this._pMesh; gl.useProgram(pg.h);
@@ -931,6 +942,7 @@ class WebGLRenderer{
         if(g.attributes.normal) on.push(this._bind(pg,"normal",g.attributes.normal,3));
         if(g.attributes.uv) on.push(this._bind(pg,"uv",g.attributes.uv,2));
         gl.drawArrays(gl.TRIANGLES,0,n);
+        this.stats.tris+=Math.floor(n/3);
         on.forEach((l)=>{ if(l>=0) gl.disableVertexAttribArray(l); });
       }else if(o.isMesh&&m.isMeshBasic){
         const pg=this._pBasic; gl.useProgram(pg.h);
@@ -948,6 +960,7 @@ class WebGLRenderer{
         on.push(this._bind(pg,"position",g.attributes.position,3));
         if(g.attributes.uv) on.push(this._bind(pg,"uv",g.attributes.uv,2));
         gl.drawArrays(gl.TRIANGLES,0,n);
+        this.stats.tris+=Math.floor(n/3);
         on.forEach((l)=>{ if(l>=0) gl.disableVertexAttribArray(l); });
       }else if(o.isLine){
         const pg=this._pLine; gl.useProgram(pg.h);
@@ -1023,6 +1036,7 @@ class Canvas2DRenderer{
     this._pr=1; this._w=300; this._h=300; this._clear="#f4efe3";
     this._view=new Matrix4(); this._tmp=new Matrix4(); this._mvp=new Matrix4();
     this.isCanvas2D=true;
+    this.stats={draws:0,tris:0};
   }
   setPixelRatio(r){ this._pr=r; this._resize(); }
   setSize(w,h){ this._w=w; this._h=h; this._resize(); }
@@ -1032,6 +1046,7 @@ class Canvas2DRenderer{
     this.domElement.style.width=this._w+"px"; this.domElement.style.height=this._h+"px";
   }
   setClearColor(hex){ this._clear=css(hexRGB(hex===undefined?0xffffff:hex)); }
+  getSize(){ return [this._w,this._h]; }
   _proj(M,x,y,z,W,H){
     const cx=M[0]*x+M[4]*y+M[8]*z+M[12], cy=M[1]*x+M[5]*y+M[9]*z+M[13],
           cw=M[3]*x+M[7]*y+M[11]*z+M[15];
@@ -1066,6 +1081,7 @@ class Canvas2DRenderer{
     ctx.setTransform(1,0,0,1,0,0);
     ctx.globalAlpha=1; ctx.globalCompositeOperation="source-over";
     ctx.fillStyle=this._clear; ctx.fillRect(0,0,W,H);
+    this.stats.draws=0; this.stats.tris=0;
     scene.updateMatrixWorld();
     this._view.lookAt(camera.position,camera._tgt||{x:0,y:0,z:0},{x:0,y:1,z:0});
     const amb=[0,0,0]; const dirDir=[0.4,0.8,0.3]; const dirCol=[0,0,0];
@@ -1097,6 +1113,7 @@ class Canvas2DRenderer{
     for(let k=0;k<items.length;k++){
       const o=items[k].o, m=o.material;
       if(m.transparent&&m.opacity<0.01) continue;
+      this.stats.draws++;
       const MW=o.matrixWorld.elements;
       this._tmp.multiplyMatrices(this._view,o.matrixWorld);
       this._mvp.multiplyMatrices(camera.projectionMatrix,this._tmp);
@@ -1118,7 +1135,7 @@ class Canvas2DRenderer{
           if(w===null) continue;
           if(fog&&m.fog!==false){ const f=sstep(fog.near,fog.far,w);
             r=r+(fogC[0]-r)*f; gg=gg+(fogC[1]-gg)*f; b=b+(fogC[2]-b)*f; }
-          ctx.fillStyle=css([r,gg,b]); ctx.fill();
+          ctx.fillStyle=css([r,gg,b]); ctx.fill(); this.stats.tris++;
         }
         ctx.globalAlpha=1;
       }else if(o.isMesh&&m.isMeshBasic){
@@ -1141,7 +1158,7 @@ class Canvas2DRenderer{
             let r=c[0],gg=c[1],b=c[2];
             if(fog&&m.fog!==false){ const f=sstep(fog.near,fog.far,w);
               r=r+(fogC[0]-r)*f; gg=gg+(fogC[1]-gg)*f; b=b+(fogC[2]-b)*f; }
-            ctx.fillStyle=css([r,gg,b]); ctx.fill();
+            ctx.fillStyle=css([r,gg,b]); ctx.fill(); this.stats.tris++;
           }
         }
         ctx.globalAlpha=1;
@@ -1329,6 +1346,7 @@ const CHAPTERS = [
 const FLAT=[]; const CH_START=[];
 CHAPTERS.forEach((c,ci)=>{ CH_START.push(FLAT.length); c.steps.forEach((s,li)=>FLAT.push({c:ci,l:li})); });
 const N = FLAT.length;
+const BUILD="2026.09.16-H";
 const REDUCED = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ---------------- academic figure palette ---------------- */
@@ -1490,7 +1508,7 @@ function buildCH0(){
   const oneCap=new THREE.Mesh(new THREE.BoxGeometry(2.2,0.1,2.2),mat(AMBER,{e:AMBER,ei:0.4}));
   oneCap.position.y=0.85; one.add(oneCap);
   const oneLbl=tag("1 App \u00B7 1 OS",AMBER,{h:0.4});
-  oneLbl.position.set(0,2.95,0); before.add(oneLbl);
+  oneLbl.position.set(0,3.2,0); before.add(oneLbl);
   const barBg=bx(4.6,0.16,0.16,mat(0xcfd4dd),null);
   barBg.position.set(0,3.7,0); before.add(barBg);
   const fill=new THREE.Mesh(new THREE.BoxGeometry(4.6*0.12,0.22,0.22),mat(AMBER,{e:AMBER,ei:0.5}));
@@ -1526,7 +1544,7 @@ function buildCH0(){
   });
 
   const shieldMat=mat(SAGE,{e:SAGE,ei:0.7,opacity:0});
-  const shield=new THREE.Mesh(new THREE.TorusGeometry(1.55,0.07,12,64),shieldMat);
+  const shield=new THREE.Mesh(new THREE.TorusGeometry(1.32,0.07,12,64),shieldMat);
   shield.position.set(0,3.1,0); shield.rotation.x=Math.PI/2.4; g.add(shield);
   const isoLbl=tag("ISOLATED",SAGE,{h:0.44,opacity:0});
   isoLbl.position.set(0,4.6,0); g.add(isoLbl);
@@ -1549,7 +1567,7 @@ function buildCH0(){
     vmObjs.forEach((o)=>{
       const y=L(0.9,2.95,kVm)+Math.sin(time*1.3+o.i*2.1)*0.07*kVm;
       o.v.position.y=y;
-      o.l.position.set(o.x,y+1.05,0);
+      o.l.position.set(o.x,y+1.15,0);
       o.l.scale.copy(o.lBase).multiplyScalar(0.3+0.7*kVm);
       const hgt=Math.max(0.05,y-1.2);
       o.conn.scale.y=hgt; o.conn.position.y=1.2+hgt/2;
@@ -1568,7 +1586,7 @@ function buildCH0(){
     setDim(vmObjs[2].v,1-0.55*kIso); setDim(vmObjs[2].l,1-0.55*kIso);
     setDim(mid.v,1); setDim(mid.l,1); setDim(shield,1); setDim(isoLbl,1);
   }
-  return {group:g,update:update};
+  return {group:g,update:update,back:back};
 }
 
 function buildCH1(){
@@ -1580,7 +1598,7 @@ function buildCH1(){
   const hyp=new THREE.Mesh(new THREE.BoxGeometry(5.6,0.22,3.0),hypMat);
   hyp.position.set(0,1.11,0); g.add(hyp);
   const hypLbl=tag("HYPERVISOR",PLUM,{h:0.42,opacity:0});
-  hypLbl.position.set(0,1.78,0); g.add(hypLbl);
+  hypLbl.position.set(0,1.2,2.35); g.add(hypLbl);
   const hostLbl=tag("HOST HARDWARE",STEEL,{h:0.4});
   hostLbl.position.set(0,0.38,2.0); g.add(hostLbl);
 
@@ -1665,7 +1683,7 @@ function buildCH1(){
     parts.visible=kB>0.02;
     if(parts.visible) driftPoints(parts,time,0.9,3,1);
   }
-  return {group:g,update:update};
+  return {group:g,update:update,back:back};
 }
 
 function buildStack(defs,edgeColor){
@@ -1758,7 +1776,7 @@ function buildCH2(){
     cone.scale.set(cp,cp,cp);
     cone.visible=kB>0.02;
   }
-  return {group:g,update:update};
+  return {group:g,update:update,back:back};
 }
 
 function buildCH3(){
@@ -1852,7 +1870,7 @@ function buildCH3(){
     polLbl.material.userData.baseOpacity=kP;
     polLbl.position.y=4.4+Math.sin(time*1.5)*0.07*kP;
   }
-  return {group:g,update:update};
+  return {group:g,update:update,back:back};
 }
 
 function buildCH4(){
@@ -1897,10 +1915,10 @@ function buildCH4(){
   const nd=new THREE.Mesh(new THREE.BoxGeometry(0.08,1.0,0.08),needleMat);
   nd.position.y=0.5; needle.add(nd); gauge.add(needle);
   const hub=new THREE.Mesh(new THREE.SphereGeometry(0.12,12,10),needleMat); gauge.add(hub);
-  const g90=tag("90",INK,{h:0.3,opacity:0}); g90.position.set(-1.35,4.55,-1.6); g.add(g90);
-  const g100=tag("100",INK,{h:0.3,opacity:0}); g100.position.set(1.35,4.55,-1.6); g.add(g100);
+  const g90=tag("90",INK,{h:0.3,opacity:0}); g90.position.set(-1.75,4.55,-1.6); g.add(g90);
+  const g100=tag("100",INK,{h:0.3,opacity:0}); g100.position.set(1.75,4.55,-1.6); g.add(g100);
   const gLbl=tag("GUEST PERFORMANCE \u224893%",BRASS,{h:0.38,opacity:0});
-  gLbl.position.set(0,5.95,-1.6); g.add(gLbl);
+  gLbl.position.set(0,6.2,-1.6); g.add(gLbl);
   const scale=new THREE.Group(); scale.position.set(0,0,2.8); g.add(scale);
   const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.12,2.9,14),mat(0x6b7280,{metal:0.5,rough:0.4}));
   pole.position.y=1.45; scale.add(pole);
@@ -1931,9 +1949,9 @@ function buildCH4(){
   const saveLbl2=tag("SAVINGS",BRASS,{h:0.4,opacity:0});
   g.add(costLbl); g.add(saveLbl2);
   const vRingMat=mat(BRASS,{e:BRASS,ei:0.6,opacity:0});
-  const vRing=new THREE.Mesh(new THREE.TorusGeometry(1.35,0.07,12,72),vRingMat);
+  const vRing=new THREE.Mesh(new THREE.TorusGeometry(2.0,0.07,12,72),vRingMat);
   vRing.position.set(0,5.35,2.0); g.add(vRing);
-  const vLbl=tag("VIRTUALIZE BY DEFAULT",BRASS,{h:0.52,opacity:0});
+  const vLbl=tag("VIRTUALIZE BY DEFAULT",BRASS,{h:0.44,opacity:0});
   vLbl.position.set(0,5.35,2.0); g.add(vLbl);
   const vLight=new THREE.PointLight(BRASS,0,20); vLight.position.set(0,5.3,3.2); g.add(vLight);
   const conf=points(130,BRASS,0.1,11,4.5,7); conf.position.set(0,4.0,1.0); g.add(conf);
@@ -1995,7 +2013,7 @@ function buildCH4(){
     conf.visible=kV>0.02;
     if(conf.visible) driftPoints(conf,time,0.8,4.5,-1);
   }
-  return {group:g,update:update};
+  return {group:g,update:update,back:back};
 }
 
 /* ============================================================
@@ -2008,16 +2026,24 @@ let camPos=null, camLook=null, camPosT=null, camLookT=null;
 let yaw=0,yawT=0,pitch=0,pitchT=0,parX=0,parY=0,parXT=0,parYT=0;
 
 let pos=0, target=0, shown=-1;
+let webglErr="", glHolder=null, diagOn=false, frameNo=0, fps=60;
 const FADE_W=0.9;
 
 function init3D(force2D){
   const holder=document.getElementById("gl");
+  glHolder=holder; stages=[]; floorGlow=null;
   renderer=force2D?new THREE.Canvas2DRenderer():new THREE.WebGLRenderer({antialias:true,alpha:false});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,force2D?1.5:2));
   if(force2D){ const lv=document.querySelector(".live"); if(lv) lv.innerHTML="<i></i>FIGURE &middot; 2D"; }
   renderer.setSize(holder.clientWidth,holder.clientHeight);
   renderer.setClearColor(PAPER,1);
   holder.appendChild(renderer.domElement);
+  renderer.domElement.addEventListener("webglcontextlost",(e)=>{
+    if(e&&e.preventDefault) e.preventDefault();
+    webglErr="context lost at runtime";
+    try{ console.warn("WebGL context lost; switching to 2D figure."); }catch(e2){}
+    try{ swapTo2D(); }catch(e3){}
+  });
 
   scene=new THREE.Scene();
   scene.fog=new THREE.Fog(PAPER,26,60);
@@ -2053,8 +2079,8 @@ function init3D(force2D){
 }
 
 function wireOrbit(el){
-  let down=false,lx=0,ly=0,sx=0,sy=0,st=0,moved=false;
-  el.style.touchAction="pan-y";
+  let down=false,lx=0,ly=0,sx=0,sy=0,st=0,moved=false,lastTapT=0;
+  el.style.touchAction="none";
   el.addEventListener("pointerdown",(e)=>{ down=true;moved=false;lx=sx=e.clientX;ly=sy=e.clientY;st=performance.now();try{el.setPointerCapture(e.pointerId);}catch(err){} });
   el.addEventListener("pointermove",(e)=>{
     const r=el.getBoundingClientRect();
@@ -2062,20 +2088,26 @@ function wireOrbit(el){
     if(!down) return;
     const dx=e.clientX-lx,dy=e.clientY-ly; lx=e.clientX;ly=e.clientY;
     if(Math.abs(e.clientX-sx)+Math.abs(e.clientY-sy)>8) moved=true;
-    yawT=clamp(yawT+dx*0.0032,-0.55,0.55);
-    pitchT=clamp(pitchT+dy*0.0022,-0.32,0.34);
+    yawT+=dx*0.01;
+    pitchT=clamp(pitchT+dy*0.006,-1.1,0.35);
     const dh=document.getElementById("dragHint"); if(dh) dh.style.opacity="0";
   });
   el.addEventListener("pointerup",(e)=>{
     down=false;
-    const dt=performance.now()-st, dx=e.clientX-sx, dy=e.clientY-sy;
-    if(!moved) return;
-    if(dt<550 && (Math.abs(dx)>60||Math.abs(dy)>60)){
-      if(Math.abs(dy)>=Math.abs(dx)) (dy<0?next:prev)();
+    const now=performance.now(), dt=now-st, dx=e.clientX-sx, dy=e.clientY-sy;
+    const adx=Math.abs(dx), ady=Math.abs(dy);
+    if(!moved||(adx<10&&ady<10)){
+      if(now-lastTapT<350){ yawT=0; pitchT=0; lastTapT=0; }
+      else lastTapT=now;
+      return;
+    }
+    if(dt<350&&(adx>100||ady>100)){
+      if(ady>=adx) (dy<0?next:prev)();
       else (dx<0?next:prev)();
     }
   });
   el.addEventListener("pointercancel",()=>{down=false;});
+  el.addEventListener("dblclick",()=>{ yawT=0; pitchT=0; });
 }
 
 /* ---------------- navigation state ---------------- */
@@ -2133,6 +2165,7 @@ function animate(){
   const dt=Math.min(0.05,(now-prevT)/1000); prevT=now;
   const time=now/1000;
   const tA=REDUCED?time*0.12:time;
+  frameNo++; if(dt>0) fps+=(1/Math.max(dt,1e-3)-fps)*0.05;
 
   pos+=(target-pos)*Math.min(1,dt*3.4);
   if(Math.abs(target-pos)<0.0015) pos=target;
@@ -2142,21 +2175,32 @@ function animate(){
   }
 
   if(has3D){
+    if(glHolder&&renderer){
+      const hw=glHolder.clientWidth, hh=glHolder.clientHeight, sz=renderer.getSize();
+      if(hw>0&&hh>0&&(hw!==sz[0]||hh!==sz[1])){ renderer.setSize(hw,hh); camera.aspect=hw/hh; camera.updateProjectionMatrix(); }
+    }
     const ai=clamp(Math.round(pos),0,N-1), ac=FLAT[ai].c;
     const cam=CHAPTERS[ac].cam;
     camPosT.set(cam[0][0],cam[0][1],cam[0][2]);
     camLookT.set(cam[1][0],cam[1][1],cam[1][2]);
     camPos.lerp(camPosT,Math.min(1,dt*2.4));
     camLook.lerp(camLookT,Math.min(1,dt*2.4));
-    yaw+=(yawT-yaw)*Math.min(1,dt*5);
-    pitch+=(pitchT-pitch)*Math.min(1,dt*5);
+    yaw+=(yawT-yaw)*Math.min(1,dt*8);
+    pitch+=(pitchT-pitch)*Math.min(1,dt*8);
     parX+=(parXT-parX)*Math.min(1,dt*3);
     parY+=(parYT-parY)*Math.min(1,dt*3);
-    const fwd=tmpV.copy(camPos).sub(camLook).normalize();
+    const ox=camPos.x-camLook.x, oy=camPos.y-camLook.y, oz=camPos.z-camLook.z;
+    const radius=Math.max(4,Math.sqrt(ox*ox+oy*oy+oz*oz));
+    const theta=Math.atan2(ox,oz)+yaw;
+    const phi=clamp(Math.acos(clamp(oy/radius,-1,1))+pitch,0.15,1.52);
+    camera.position.set(
+      camLook.x+radius*Math.sin(phi)*Math.sin(theta),
+      camLook.y+radius*Math.cos(phi),
+      camLook.z+radius*Math.sin(phi)*Math.cos(theta));
+    const fwd=tmpV.copy(camera.position).sub(camLook).normalize();
     const right=new THREE.Vector3().crossVectors(fwd,new THREE.Vector3(0,1,0)).normalize();
-    camera.position.copy(camPos)
-      .addScaledVector(right,(yaw+parX*0.12)*4)
-      .add(new THREE.Vector3(0,(pitch+parY*0.1)*3,0));
+    camera.position.addScaledVector(right,parX*0.8);
+    camera.position.y+=parY*0.5;
     camera.lookAt(camLook);
     if(floorGlow) floorGlow.material.opacity=0.12+0.04*Math.sin(tA*0.8);
 
@@ -2170,16 +2214,44 @@ function animate(){
       st.group.visible=k>0.01;
       if(st.group.visible){
         st.update(clamp(pos-s,0,CHAPTERS[ci].steps.length-1),tA);
+        if(st.back) st.back.position.set(camLook.x-fwd.x*10,camLook.y-fwd.y*10+1.2,camLook.z-fwd.z*10);
         applyFade(st.group,k);
       }
     });
     renderer.render(scene,camera);
+    if(diagOn&&frameNo%15===0) updateDiag();
   }
 
   syncUI(false);
   const sc=$("scrub");
   if(document.activeElement!==sc&&!sc.matches(":active")) sc.value=pos;
 }
+
+/* ---------------- diagnostics + recovery ---------------- */
+function swapTo2D(){
+  try{ const h=document.getElementById("gl"); if(h) h.innerHTML=""; }catch(e){}
+  stages=[]; floorGlow=null; renderer=null;
+  init3D(true);
+}
+function toggleDiag(){
+  diagOn=!diagOn;
+  const el=document.getElementById("diag");
+  if(el) el.style.display=diagOn?"block":"none";
+  if(diagOn) updateDiag();
+}
+function updateDiag(){
+  const el=document.getElementById("diag"); if(!el||!diagOn) return;
+  const st=(renderer&&renderer.stats)||{};
+  el.textContent=
+    "BUILD "+BUILD+"\n"+
+    "renderer: "+(renderer?(renderer.isCanvas2D?"canvas-2d":("webgl ("+(renderer._mode||"?")+")")):"none")+"\n"+
+    "webgl error: "+(webglErr||"none")+"\n"+
+    "stage: "+(glHolder?glHolder.clientWidth+"x"+glHolder.clientHeight:"?")+" css / canvas "+
+    (renderer?renderer.domElement.width+"x"+renderer.domElement.height:"?")+"\n"+
+    "fps: "+fps.toFixed(0)+"  step: "+(shown+1)+"/"+N+"  pos: "+pos.toFixed(2)+"\n"+
+    "draws: "+(st.draws||0)+"  tris: "+(st.tris||0);
+}
+try{ console.log("%cVirtualization lecture "+BUILD+" — press D for diagnostics","font-weight:bold"); }catch(e){}
 
 /* ---------------- controls ---------------- */
 function setLecture(on){
@@ -2220,6 +2292,7 @@ function wireUI(){
     dots.appendChild(d);
   });
   $("scrub").max=N-1;
+  try{ $("keysHint").innerHTML+=" &middot; BUILD "+BUILD; }catch(e){}
   $("nextBtn").addEventListener("click",next);
   $("prevBtn").addEventListener("click",prev);
   $("fNext").addEventListener("click",next);
@@ -2228,6 +2301,7 @@ function wireUI(){
   $("fsBtn").addEventListener("click",toggleFS);
   $("helpBtn").addEventListener("click",()=>toggleHelp());
   $("helpClose").addEventListener("click",()=>toggleHelp(false));
+  $("diagLink").addEventListener("click",()=>toggleDiag());
   $("helpModal").addEventListener("click",(e)=>{ if(e.target.id==="helpModal") toggleHelp(false); });
 
   const sc=$("scrub");
@@ -2261,19 +2335,9 @@ function wireUI(){
     else if(e.key==="f"||e.key==="F"){ toggleFS(); }
     else if(e.key==="l"||e.key==="L"){ setLecture(!lectureOn); }
     else if(e.key==="?"){ toggleHelp(); }
+    else if(e.key==="d"||e.key==="D"){ toggleDiag(); }
     else if(e.key==="Escape"){ toggleHelp(false); }
   });
-
-  let tx=0,ty=0,tt=0;
-  const vp=$("viewport");
-  vp.addEventListener("touchstart",(e)=>{ const t=e.changedTouches[0];tx=t.clientX;ty=t.clientY;tt=performance.now(); },{passive:true});
-  vp.addEventListener("touchend",(e)=>{
-    const t=e.changedTouches[0],dt=performance.now()-tt;
-    const dx=t.clientX-tx,dy=t.clientY-ty;
-    if(dt<550&&(Math.abs(dx)>60||Math.abs(dy)>60)){
-      if(Math.abs(dy)>=Math.abs(dx)) (dy<0?next:prev)(); else (dx<0?next:prev)();
-    }
-  },{passive:true});
 
   try{
     const m=location.hash.match(/s=(\d+)/);
@@ -2286,7 +2350,8 @@ wireUI();
 try{
   init3D(false);
 }catch(err){
-  try{ console.warn("WebGL figure path failed ("+(err&&err.message)+"); using 2D figure renderer."); }catch(e2){}
+  webglErr=(err&&err.message)||"unknown";
+  try{ console.warn("WebGL figure path failed ("+webglErr+"); using 2D figure renderer."); }catch(e2){}
   try{
     init3D(true);
   }catch(err2){
