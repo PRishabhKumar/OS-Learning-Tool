@@ -217,7 +217,7 @@ kbd{font-family:"IBM Plex Mono",monospace;font-size:10.5px;background:#fff;borde
       <div class="card">
         <div class="sec">&sect;</div>
         <h3>Figure unavailable</h3>
-        <p>This browser could render neither the WebGL nor the fallback figure, so the illustration is withheld. The complete lesson text and all navigation remain fully available.</p>
+        <p>This browser could not initialise WebGL, so the illustration is withheld. The complete lesson text and all navigation remain fully available.</p>
       </div>
     </div>
   </section>
@@ -1024,194 +1024,6 @@ class WebGLRenderer{
   }
 }
 
-/* 2D fallback: projects the same scene graph onto a plain 2D canvas.
-   Used automatically when WebGL is unavailable, so a figure always renders. */
-function css(c){ return "rgb("+Math.round(Math.min(1,c[0])*255)+","+Math.round(Math.min(1,c[1])*255)+","+Math.round(Math.min(1,c[2])*255)+")"; }
-function sstep(a,b,x){ const t=Math.max(0,Math.min(1,(x-a)/(b-a))); return t*t*(3-2*t); }
-class Canvas2DRenderer{
-  constructor(){
-    this.domElement=document.createElement("canvas");
-    this.ctx=this.domElement.getContext("2d");
-    if(!this.ctx) throw new Error("Canvas 2D unavailable");
-    this._pr=1; this._w=300; this._h=300; this._clear="#f4efe3";
-    this._view=new Matrix4(); this._tmp=new Matrix4(); this._mvp=new Matrix4();
-    this.isCanvas2D=true;
-    this.stats={draws:0,tris:0};
-  }
-  setPixelRatio(r){ this._pr=r; this._resize(); }
-  setSize(w,h){ this._w=w; this._h=h; this._resize(); }
-  _resize(){
-    this.domElement.width=Math.max(1,Math.round(this._w*this._pr));
-    this.domElement.height=Math.max(1,Math.round(this._h*this._pr));
-    this.domElement.style.width=this._w+"px"; this.domElement.style.height=this._h+"px";
-  }
-  setClearColor(hex){ this._clear=css(hexRGB(hex===undefined?0xffffff:hex)); }
-  getSize(){ return [this._w,this._h]; }
-  _proj(M,x,y,z,W,H){
-    const cx=M[0]*x+M[4]*y+M[8]*z+M[12], cy=M[1]*x+M[5]*y+M[9]*z+M[13],
-          cw=M[3]*x+M[7]*y+M[11]*z+M[15];
-    if(cw<=0.001) return null;
-    return [(cx/cw*0.5+0.5)*W,(1-(cy/cw*0.5+0.5))*H,cw];
-  }
-  _tinted(m){
-    try{
-      if(m._tint2d) return m._tint2d;
-      const img=m.map.image, c=document.createElement("canvas");
-      c.width=img.width||128; c.height=img.height||128;
-      const x=c.getContext("2d");
-      x.drawImage(img,0,0,c.width,c.height);
-      x.globalCompositeOperation="multiply";
-      x.fillStyle=css(hexRGB(m.color)); x.fillRect(0,0,c.width,c.height);
-      x.globalCompositeOperation="destination-in";
-      x.drawImage(img,0,0,c.width,c.height);
-      m._tint2d=c; return c;
-    }catch(err){ return m.map.image; }
-  }
-  _tri(ctx,M,posA,i,W,H){
-    const p0=this._proj(M,posA[i*3],posA[i*3+1],posA[i*3+2],W,H);
-    const p1=this._proj(M,posA[i*3+3],posA[i*3+4],posA[i*3+5],W,H);
-    const p2=this._proj(M,posA[i*3+6],posA[i*3+7],posA[i*3+8],W,H);
-    if(!p0||!p1||!p2) return null;
-    ctx.beginPath(); ctx.moveTo(p0[0],p0[1]); ctx.lineTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.closePath();
-    return (p0[2]+p1[2]+p2[2])/3;
-  }
-  render(scene,camera){
-    const ctx=this.ctx, W=this.domElement.width, H=this.domElement.height;
-    if(W<2||H<2||!ctx) return;
-    ctx.setTransform(1,0,0,1,0,0);
-    ctx.globalAlpha=1; ctx.globalCompositeOperation="source-over";
-    ctx.fillStyle=this._clear; ctx.fillRect(0,0,W,H);
-    this.stats.draws=0; this.stats.tris=0;
-    scene.updateMatrixWorld();
-    this._view.lookAt(camera.position,camera._tgt||{x:0,y:0,z:0},{x:0,y:1,z:0});
-    const amb=[0,0,0]; const dirDir=[0.4,0.8,0.3]; const dirCol=[0,0,0];
-    let dirFound=false;
-    const items=[]; const e=camera.position;
-    (function walk(o,vis){
-      const v=vis&&o.visible; if(!v) return;
-      if(o.isAmbient){ const c=hexRGB(o.color); amb[0]+=c[0]*o.intensity; amb[1]+=c[1]*o.intensity; amb[2]+=c[2]*o.intensity; }
-      else if(o.isDir&&!dirFound){ dirFound=true;
-        const me=o.matrixWorld.elements, l=Math.sqrt(me[12]*me[12]+me[13]*me[13]+me[14]*me[14])||1;
-        dirDir[0]=me[12]/l; dirDir[1]=me[13]/l; dirDir[2]=me[14]/l;
-        const c=hexRGB(o.color); dirCol[0]=c[0]*o.intensity; dirCol[1]=c[1]*o.intensity; dirCol[2]=c[2]*o.intensity;
-      }
-      else if(o.isMesh||o.isLine||o.isPoints||o.isSprite){
-        const me=o.matrixWorld.elements;
-        const dx=me[12]-e.x, dy=me[13]-e.y, dz=me[14]-e.z;
-        items.push({o:o,depth:dx*dx+dy*dy+dz*dz});
-      }
-      for(let i=0;i<o.children.length;i++) walk(o.children[i],true);
-    })(scene,true);
-    items.sort((a,b)=>{
-      const ta=a.o.material.transparent?1:0, tb=b.o.material.transparent?1:0;
-      if(ta!==tb) return ta-tb;
-      if(a.o.renderOrder!==b.o.renderOrder) return a.o.renderOrder-b.o.renderOrder;
-      return b.depth-a.depth;
-    });
-    const fog=scene.fog, fogC=fog?hexRGB(fog.color):[1,1,1];
-    const pScale=H/(2*Math.tan(camera.fov*Math.PI/360));
-    for(let k=0;k<items.length;k++){
-      const o=items[k].o, m=o.material;
-      if(m.transparent&&m.opacity<0.01) continue;
-      this.stats.draws++;
-      const MW=o.matrixWorld.elements;
-      this._tmp.multiplyMatrices(this._view,o.matrixWorld);
-      this._mvp.multiplyMatrices(camera.projectionMatrix,this._tmp);
-      const M=this._mvp.elements;
-      if(o.isMesh&&m.isMeshStandard){
-        const g=o.geometry, posA=g.attributes.position.array, norA=g.attributes.normal.array;
-        const alb=hexRGB(m.color), emi=hexRGB(m.emissive), n=posA.length/3;
-        ctx.globalAlpha=m.opacity;
-        for(let i=0;i<n;i+=3){
-          let wx=MW[0]*norA[i*3]+MW[4]*norA[i*3+1]+MW[8]*norA[i*3+2];
-          let wy=MW[1]*norA[i*3]+MW[5]*norA[i*3+1]+MW[9]*norA[i*3+2];
-          let wz=MW[2]*norA[i*3]+MW[6]*norA[i*3+1]+MW[10]*norA[i*3+2];
-          const nl=Math.sqrt(wx*wx+wy*wy+wz*wz)||1;
-          const df=Math.max(0,(wx*dirDir[0]+wy*dirDir[1]+wz*dirDir[2])/nl);
-          let r=alb[0]*(amb[0]+dirCol[0]*df)+emi[0]*m.emissiveIntensity;
-          let gg=alb[1]*(amb[1]+dirCol[1]*df)+emi[1]*m.emissiveIntensity;
-          let b=alb[2]*(amb[2]+dirCol[2]*df)+emi[2]*m.emissiveIntensity;
-          const w=this._tri(ctx,M,posA,i,W,H);
-          if(w===null) continue;
-          if(fog&&m.fog!==false){ const f=sstep(fog.near,fog.far,w);
-            r=r+(fogC[0]-r)*f; gg=gg+(fogC[1]-gg)*f; b=b+(fogC[2]-b)*f; }
-          ctx.fillStyle=css([r,gg,b]); ctx.fill(); this.stats.tris++;
-        }
-        ctx.globalAlpha=1;
-      }else if(o.isMesh&&m.isMeshBasic){
-        const g=o.geometry, posA=g.attributes.position.array, n=posA.length/3;
-        if(m.map&&m.map.image){
-          let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9,hit=false;
-          for(let i=0;i<n;i++){
-            const p=this._proj(M,posA[i*3],posA[i*3+1],posA[i*3+2],W,H);
-            if(!p) continue; hit=true;
-            if(p[0]<x0)x0=p[0]; if(p[1]<y0)y0=p[1]; if(p[0]>x1)x1=p[0]; if(p[1]>y1)y1=p[1];
-          }
-          if(hit){ ctx.globalAlpha=m.opacity*0.9;
-            try{ ctx.drawImage(this._tinted(m),x0,y0,Math.max(1,x1-x0),Math.max(1,y1-y0)); }catch(err){} }
-        }else{
-          const c=hexRGB(m.color);
-          ctx.globalAlpha=m.opacity;
-          for(let i=0;i<n;i+=3){
-            const w=this._tri(ctx,M,posA,i,W,H);
-            if(w===null) continue;
-            let r=c[0],gg=c[1],b=c[2];
-            if(fog&&m.fog!==false){ const f=sstep(fog.near,fog.far,w);
-              r=r+(fogC[0]-r)*f; gg=gg+(fogC[1]-gg)*f; b=b+(fogC[2]-b)*f; }
-            ctx.fillStyle=css([r,gg,b]); ctx.fill(); this.stats.tris++;
-          }
-        }
-        ctx.globalAlpha=1;
-      }else if(o.isLine){
-        const g=o.geometry, posA=g.attributes.position.array, n=posA.length/3;
-        ctx.globalAlpha=m.opacity; ctx.lineWidth=Math.max(1,this._pr);
-        if(m.vertexColors&&g.attributes.color){
-          const ca=g.attributes.color.array;
-          for(let i=0;i<n;i+=2){
-            const p0=this._proj(M,posA[i*3],posA[i*3+1],posA[i*3+2],W,H);
-            const p1=this._proj(M,posA[i*3+3],posA[i*3+4],posA[i*3+5],W,H);
-            if(!p0||!p1) continue;
-            ctx.strokeStyle=css([ca[i*3],ca[i*3+1],ca[i*3+2]]);
-            ctx.beginPath(); ctx.moveTo(p0[0],p0[1]); ctx.lineTo(p1[0],p1[1]); ctx.stroke();
-          }
-        }else{
-          ctx.strokeStyle=css(hexRGB(m.color));
-          ctx.beginPath();
-          for(let i=0;i<n;i+=2){
-            const p0=this._proj(M,posA[i*3],posA[i*3+1],posA[i*3+2],W,H);
-            const p1=this._proj(M,posA[i*3+3],posA[i*3+4],posA[i*3+5],W,H);
-            if(!p0||!p1) continue;
-            ctx.moveTo(p0[0],p0[1]); ctx.lineTo(p1[0],p1[1]);
-          }
-          ctx.stroke();
-        }
-        ctx.globalAlpha=1;
-      }else if(o.isPoints){
-        const posA=o.geometry.attributes.position.array, n=posA.length/3;
-        ctx.fillStyle=css(hexRGB(m.color)); ctx.globalAlpha=m.opacity;
-        for(let i=0;i<n;i++){
-          const p=this._proj(M,posA[i*3],posA[i*3+1],posA[i*3+2],W,H);
-          if(!p) continue;
-          ctx.beginPath(); ctx.arc(p[0],p[1],Math.max(0.5,m.size*pScale/p[2]),0,6.2832); ctx.fill();
-        }
-        ctx.globalAlpha=1;
-      }else if(o.isSprite){
-        if(!m.map||!m.map.image) continue;
-        const p=this._proj(M,0,0,0,W,H);
-        if(!p) continue;
-        const sx=Math.sqrt(MW[0]*MW[0]+MW[1]*MW[1]+MW[2]*MW[2]);
-        const sy=Math.sqrt(MW[4]*MW[4]+MW[5]*MW[5]+MW[6]*MW[6]);
-        const w=sx*pScale/p[2], h=sy*pScale/p[2];
-        if(w<1||h<1) continue;
-        ctx.globalAlpha=m.opacity;
-        try{ ctx.drawImage(m.color!==0xffffff?this._tinted(m):m.map.image,p[0]-w/2,p[1]-h/2,w,h); }catch(err){}
-        ctx.globalAlpha=1;
-      }
-    }
-    ctx.globalAlpha=1;
-  }
-}
-
 return {
   Vector3:Vector3, Color:Color, Euler:Euler, Quaternion:Quaternion, Matrix4:Matrix4,
   Object3D:Object3D, Group:Group, Mesh:Mesh, LineSegments:LineSegments, Points:Points, Sprite:Sprite,
@@ -1223,7 +1035,7 @@ return {
   OctahedronGeometry:OctahedronGeometry, EdgesGeometry:EdgesGeometry, GridHelper:GridHelper,
   MeshStandardMaterial:MeshStandardMaterial, MeshBasicMaterial:MeshBasicMaterial,
   LineBasicMaterial:LineBasicMaterial, SpriteMaterial:SpriteMaterial, PointsMaterial:PointsMaterial,
-  CanvasTexture:CanvasTexture, WebGLRenderer:WebGLRenderer, Canvas2DRenderer:Canvas2DRenderer,
+  CanvasTexture:CanvasTexture, WebGLRenderer:WebGLRenderer,
   FrontSide:FrontSide, BackSide:BackSide, DoubleSide:DoubleSide,
   NormalBlending:NormalBlending, AdditiveBlending:AdditiveBlending, sRGBEncoding:sRGBEncoding
 };
@@ -1346,7 +1158,7 @@ const CHAPTERS = [
 const FLAT=[]; const CH_START=[];
 CHAPTERS.forEach((c,ci)=>{ CH_START.push(FLAT.length); c.steps.forEach((s,li)=>FLAT.push({c:ci,l:li})); });
 const N = FLAT.length;
-const BUILD="2026.09.16-H";
+const BUILD="2026.09.16-L";
 const REDUCED = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ---------------- academic figure palette ---------------- */
@@ -2029,20 +1841,19 @@ let pos=0, target=0, shown=-1;
 let webglErr="", glHolder=null, diagOn=false, frameNo=0, fps=60;
 const FADE_W=0.9;
 
-function init3D(force2D){
+function init3D(){
   const holder=document.getElementById("gl");
   glHolder=holder; stages=[]; floorGlow=null;
-  renderer=force2D?new THREE.Canvas2DRenderer():new THREE.WebGLRenderer({antialias:true,alpha:false});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,force2D?1.5:2));
-  if(force2D){ const lv=document.querySelector(".live"); if(lv) lv.innerHTML="<i></i>FIGURE &middot; 2D"; }
+  renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
   renderer.setSize(holder.clientWidth,holder.clientHeight);
   renderer.setClearColor(PAPER,1);
   holder.appendChild(renderer.domElement);
   renderer.domElement.addEventListener("webglcontextlost",(e)=>{
     if(e&&e.preventDefault) e.preventDefault();
     webglErr="context lost at runtime";
-    try{ console.warn("WebGL context lost; switching to 2D figure."); }catch(e2){}
-    try{ swapTo2D(); }catch(e3){}
+    try{ console.warn("WebGL context lost; figure unavailable."); }catch(e2){}
+    try{ fatalFigure(); }catch(e3){}
   });
 
   scene=new THREE.Scene();
@@ -2228,11 +2039,6 @@ function animate(){
 }
 
 /* ---------------- diagnostics + recovery ---------------- */
-function swapTo2D(){
-  try{ const h=document.getElementById("gl"); if(h) h.innerHTML=""; }catch(e){}
-  stages=[]; floorGlow=null; renderer=null;
-  init3D(true);
-}
 function toggleDiag(){
   diagOn=!diagOn;
   const el=document.getElementById("diag");
@@ -2244,7 +2050,7 @@ function updateDiag(){
   const st=(renderer&&renderer.stats)||{};
   el.textContent=
     "BUILD "+BUILD+"\n"+
-    "renderer: "+(renderer?(renderer.isCanvas2D?"canvas-2d":("webgl ("+(renderer._mode||"?")+")")):"none")+"\n"+
+    "renderer: "+(renderer?("webgl ("+(renderer._mode||"?")+")"):"none")+"\n"+
     "webgl error: "+(webglErr||"none")+"\n"+
     "stage: "+(glHolder?glHolder.clientWidth+"x"+glHolder.clientHeight:"?")+" css / canvas "+
     (renderer?renderer.domElement.width+"x"+renderer.domElement.height:"?")+"\n"+
@@ -2253,6 +2059,13 @@ function updateDiag(){
 }
 try{ console.log("%cVirtualization lecture "+BUILD+" — press D for diagnostics","font-weight:bold"); }catch(e){}
 
+function fatalFigure(){
+  try{
+    document.getElementById("glFallback").classList.add("show");
+    document.getElementById("dragHint").style.display="none";
+    const lv=document.querySelector(".live"); if(lv) lv.style.display="none";
+  }catch(e){}
+}
 /* ---------------- controls ---------------- */
 function setLecture(on){
   lectureOn=on;
@@ -2347,33 +2160,11 @@ function wireUI(){
 
 /* ---------------- boot ---------------- */
 wireUI();
-try{
-  init3D(false);
-}catch(err){
+try{ init3D(); }
+catch(err){
   webglErr=(err&&err.message)||"unknown";
-  try{ console.warn("WebGL figure path failed ("+webglErr+"); using 2D figure renderer."); }catch(e2){}
-  try{
-    init3D(true);
-  }catch(err2){
-    document.getElementById("glFallback").classList.add("show");
-    document.getElementById("dragHint").style.display="none";
-    document.querySelector(".live").style.display="none";
-  }
-}
-syncUI(true);
-animate();
-</script>
-</body>
-</html>
-t").style.display="none";
-  document.querySelector(".live").style.display="none";
-}
-syncUI(true);
-animate();
-</script>
-</body>
-</html>
-ive").style.display="none";
+  try{ console.warn("WebGL figure unavailable ("+webglErr+")."); }catch(e2){}
+  fatalFigure();
 }
 syncUI(true);
 animate();
